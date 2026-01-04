@@ -6,75 +6,112 @@
     <title>藝人幫數位簽到</title>
     <script charset="utf-8" src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
     <style>
-        body { font-family: "Microsoft JhengHei", -apple-system, BlinkMacSystemFont, sans-serif; text-align: center; padding: 20px; background-color: #f0f0f0; color: #333; }
+        body { font-family: "Microsoft JhengHei", sans-serif; text-align: center; padding: 20px; background-color: #f0f0f0; color: #333; }
         .container { background: white; padding: 30px; border-radius: 12px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); max-width: 400px; margin: 0 auto; }
         h2 { color: #00b900; margin-bottom: 10px; }
-        .loader { border: 5px solid #f3f3f3; border-top: 5px solid #00b900; border-radius: 50%; width: 50px; height: 50px; animation: spin 1s linear infinite; margin: 20px auto; }
+        .loader { border: 5px solid #f3f3f3; border-top: 5px solid #00b900; border-radius: 50%; width: 50px; height: 50px; animation: spin 1s linear infinite; margin: 20px auto; display: none; } /* 預設隱藏 */
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-        #msg { margin-top: 20px; font-size: 16px; font-weight: bold; }
-        .btn { display: none; background-color: #333; color: white; padding: 10px 20px; border-radius: 5px; text-decoration: none; margin-top: 20px; cursor: pointer; }
+        
+        #msg { margin-top: 20px; font-size: 16px; font-weight: bold; line-height: 1.5;}
+        
+        /* 新增：輸入框樣式 */
+        .input-group { margin: 20px 0; text-align: left; }
+        label { display: block; margin-bottom: 5px; font-weight: bold; color: #555; }
+        input[type="text"] { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 5px; box-sizing: border-box; font-size: 16px; }
+        
+        .btn { display: inline-block; background-color: #00b900; color: white; padding: 12px 30px; border-radius: 8px; text-decoration: none; margin-top: 10px; cursor: pointer; font-size: 16px; border: none; width: 100%; }
+        .btn:disabled { background-color: #ccc; }
+        .btn-retry { background-color: #333; display: none; }
     </style>
 </head>
 <body>
     <div class="container">
-        <h2>藝人簽到 (正式版)</h2>
+        <h2>藝人簽到 (V1.0)</h2>
+        
+        <div id="content">
+            <p id="welcomeMsg">讀取資料中...</p>
+
+            <div class="input-group">
+                <label for="guestInput">📝 攜帶親友/備註 (選填)</label>
+                <input type="text" id="guestInput" placeholder="例如：1大2小，或吃素">
+            </div>
+
+            <button id="checkInBtn" class="btn" onclick="startCheckIn()">確認簽到</button>
+        </div>
+
         <div id="loader" class="loader"></div>
-        <p id="msg">系統啟動中...</p>
-        <button onclick="window.location.reload()" id="retryBtn" class="btn">重新整理</button>
+        <p id="msg"></p>
+        <button onclick="window.location.reload()" id="retryBtn" class="btn btn-retry">重新整理</button>
     </div>
 
     <script>
-        // ▼▼▼ 請填入你的 GAS 網址 (務必確認結尾是 /exec) ▼▼▼
+        // ▼▼▼ 確認網址沒變 (如果有變請更新) ▼▼▼
         const GAS_API_URL = "https://script.google.com/macros/s/AKfycbymStRpq8NZjJahu6iPzP1JiKPwf4KlZk2LCjx0szyCLPm3L8WtigUdhh-6J7eByHRsCg/exec"; 
         const liffId = "2008812319-8LaCFrXR";
 
+        // 全域變數存使用者資料
+        let userProfile = null;
+
         async function main() {
             try {
-                // 1. 初始化 LIFF
                 await liff.init({ liffId: liffId });
-
-                // 2. 檢查登入
                 if (!liff.isLoggedIn()) {
                     liff.login();
                     return;
                 }
-
-                const profile = await liff.getProfile();
-                document.getElementById("msg").innerText = `你好，${profile.displayName}\n正在寫入簽到表...`;
-
-                // 3. 傳送資料
-                const postData = JSON.stringify({
-                    userId: profile.userId,
-                    displayName: profile.displayName,
-                    pictureUrl: profile.pictureUrl
-                });
-
-                // 使用 fetch 發送
-                fetch(GAS_API_URL, {
-                    method: "POST",
-                    body: postData,
-                    headers: { "Content-Type": "text/plain" }
-                })
-                .then(response => response.text())
-                .then(text => {
-                    document.getElementById("loader").style.display = "none";
-                    document.getElementById("msg").innerText = "簽到完成！\n" + text;
-                    document.getElementById("msg").style.color = "#00b900";
-                    alert("簽到成功！\n" + text);
-                })
-                .catch(err => {
-                    document.getElementById("loader").style.display = "none";
-                    document.getElementById("msg").innerText = "已送出請求";
-                    alert("已送出簽到請求，請確認群組或名單");
-                });
-
+                userProfile = await liff.getProfile();
+                document.getElementById("welcomeMsg").innerText = `你好，${userProfile.displayName}`;
             } catch (err) {
-                document.getElementById("loader").style.display = "none";
-                document.getElementById("msg").innerText = "發生錯誤";
-                document.getElementById("retryBtn").style.display = "inline-block";
-                alert("錯誤：" + err.message);
+                document.getElementById("welcomeMsg").innerText = "系統錯誤：" + err.message;
             }
         }
+
+        // 按下按鈕才觸發簽到
+        function startCheckIn() {
+            if (!userProfile) {
+                alert("尚未取得使用者資料，請稍後再試");
+                return;
+            }
+
+            // 1. 鎖定按鈕與顯示轉圈圈
+            document.getElementById("content").style.display = "none";
+            document.getElementById("loader").style.display = "block";
+            document.getElementById("msg").innerText = "正在寫入簽到表...";
+
+            // 2. 取得輸入的備註
+            const guestNote = document.getElementById("guestInput").value;
+
+            // 3. 打包資料
+            const postData = JSON.stringify({
+                userId: userProfile.userId,
+                displayName: userProfile.displayName,
+                pictureUrl: userProfile.pictureUrl,
+                guestInfo: guestNote // ★ 把備註傳出去
+            });
+
+            // 4. 發送
+            fetch(GAS_API_URL, {
+                method: "POST",
+                body: postData,
+                headers: { "Content-Type": "text/plain" }
+            })
+            .then(response => response.text())
+            .then(text => {
+                document.getElementById("loader").style.display = "none";
+                document.getElementById("msg").innerText = text;
+                document.getElementById("msg").style.color = "#00b900";
+                
+                // 成功後是否關閉視窗？
+                // liff.closeWindow(); 
+            })
+            .catch(err => {
+                document.getElementById("loader").style.display = "none";
+                document.getElementById("msg").innerText = "連線異常，但可能已簽到成功。請確認名單。";
+                document.getElementById("msg").style.color = "red";
+                document.getElementById("retryBtn").style.display = "inline-block";
+            });
+        }
+
         main();
     </script>
 </body>
