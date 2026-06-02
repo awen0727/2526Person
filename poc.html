@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <title>群愛獅子會 - 人臉辨識 POC 測試台</title>
+    <script defer src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
+    <style>
+        body { background-color: #111; color: #fff; font-family: sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; }
+        h2 { color: #fbd050; margin-bottom: 10px; }
+        #video-container { position: relative; border: 3px solid #fbd050; border-radius: 10px; overflow: hidden; background: #000; box-shadow: 0 0 20px rgba(251, 208, 80, 0.3); }
+        canvas { position: absolute; top: 0; left: 0; }
+        #log { margin-top: 15px; color: #aaa; width: 600px; text-align: center; height: 80px; overflow-y: auto; font-size: 0.95rem; line-height: 1.5; background: #222; padding: 10px; border-radius: 8px;}
+    </style>
+</head>
+<body>
+    <h2>🦁 群愛獅子會 人臉辨識系統 測試台</h2>
+    <div id="video-container">
+        <video id="video" width="720" height="560" autoplay muted></video>
+    </div>
+    <div id="log">系統初始化中...</div>
+
+    <script>
+        const video = document.getElementById('video');
+        const logDiv = document.getElementById('log');
+        
+        // 雲端 AI 模型庫
+        const MODEL_URL = 'https://vladmandic.github.io/face-api/model/';
+
+        // ★★★ Master，請在這裡設定您的測試照片清單！ ★★★
+        // 陣列裡的名字，必須和資料夾裡的照片檔名一模一樣 (不含副檔名)
+        const LabeledNames = ["Chris", "Amanda"]; 
+
+        // 訊息列印函數
+        function log(msg) {
+            console.log(msg);
+            logDiv.innerHTML = msg + "<br>" + logDiv.innerHTML;
+        }
+
+        // 1. 載入模型
+        async function init() {
+            log("⏳ 正在下載 AI 視覺模型 (約需 10~20 秒)...");
+            await Promise.all([
+                faceapi.nets.ssdMobilenetv1.loadFromUri(MODEL_URL),    // 更精準的人臉偵測
+                faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL), // 五官定位
+                faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL) // 特徵碼轉換
+            ]);
+            log("✅ 模型載入完成！開始提取照片特徵...");
+            start();
+        }
+
+        // 2. 讓 AI 看照片並死記硬背 (建立參考特徵庫)
+        async function loadLabeledImages() {
+            return Promise.all(
+                LabeledNames.map(async label => {
+                    const descriptions = [];
+                    try {
+                        const img = await faceapi.fetchImage(`${label}.jpg`);
+                        const detections = await faceapi.detectSingleFace(img).withFaceLandmarks().withFaceDescriptor();
+                        if(detections) {
+                            descriptions.push(detections.descriptor);
+                            log(`📸 成功提取：${label} 的臉部特徵`);
+                        } else {
+                            log(`⚠️ 失敗：無法在 ${label}.jpg 找到人臉`);
+                        }
+                    } catch (e) {
+                        log(`❌ 檔案錯誤：找不到 ${label}.jpg`);
+                    }
+                    return new faceapi.LabeledFaceDescriptors(label, descriptions);
+                })
+            );
+        }
+
+        // 3. 啟動鏡頭與即時辨識
+        async function start() {
+            const labeledFaceDescriptors = await loadLabeledImages();
+            
+            // 設定比對器，數字 0.5 是容錯率 (Threshold)。
+            // 越接近 0 越嚴格(容易認不出)，越接近 1 越寬鬆(容易認錯人)。實測 0.45 ~ 0.5 最剛好。
+            const faceMatcher = new faceapi.FaceMatcher(labeledFaceDescriptors, 0.5); 
+            
+            log("✅ 記憶庫建置完畢！正在啟動鏡頭...");
+
+            navigator.mediaDevices.getUserMedia({ video: {} })
+                .then(stream => { video.srcObject = stream; })
+                .catch(err => log("❌ 鏡頭啟動失敗，請確認瀏覽器權限！"));
+
+            video.addEventListener('play', () => {
+                const canvas = faceapi.createCanvasFromMedia(video);
+                document.getElementById('video-container').append(canvas);
+                const displaySize = { width: video.width, height: video.height };
+                faceapi.matchDimensions(canvas, displaySize);
+
+                log("🟢 系統即時辨識中... Master 請看向鏡頭！");
+
+                // 每 0.1 秒掃描一次畫面
+                setInterval(async () => {
+                    const detections = await faceapi.detectAllFaces(video).withFaceLandmarks().withFaceDescriptors();
+                    const resizedDetections = faceapi.resizeResults(detections, displaySize);
+                    
+                    canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height);
+                    
+                    const results = resizedDetections.map(d => faceMatcher.findBestMatch(d.descriptor));
+                    
+                    results.forEach((result, i) => {
+                        const box = resizedDetections[i].detection.box;
+                        // 如果系統認不出是誰 (距離大於0.5)，會判定為 unknown，顯示紅色框；若是認識的人，顯示金色框
+                        const drawColor = result.label === 'unknown' ? '#d32f2f' : '#fbd050';
+                        const drawBox = new faceapi.draw.DrawBox(box, { label: result.toString(), boxColor: drawColor });
+                        drawBox.draw(canvas);
+                    });
+                }, 100); 
+            });
+        }
+
+        // 啟動程式
+        init();
+    </script>
+</body>
+</html>
